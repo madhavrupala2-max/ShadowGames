@@ -1,0 +1,14 @@
+{
+  "name": "arcadex",
+  "version": "1.0.0",
+  "description": "AirConsole-style party console: big screen + phones as controllers",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@fontsource/mukta": "^5.3.0",
+    "qrcode": "^1.5.4",
+    "ws": "^8.18.0"
+  }
+}

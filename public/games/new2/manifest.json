@@ -1,0 +1,11 @@
+{
+  "type": "html",
+  "entry": "index.html",
+  "name": "new2",
+  "tag": "One line|another line",
+  "color": "#22d3ee",
+  "min": 1,
+  "max": 8,
+  "order": 200,
+  "layout": { "stick": true, "buttons": [{ "id": "a", "label": "A", "color": "#ff3d71" }], "hint": "Stick = move · A = action" }
+}

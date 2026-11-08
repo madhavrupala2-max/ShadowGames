@@ -1,0 +1,19 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>My HTML game</title>
+<style>html,body{margin:0;height:100%;background:#0a0620;color:#fff;font-family:Mukta,system-ui,sans-serif}canvas{width:100%;height:100%;display:block}</style></head>
+<body><canvas id="c" width="1280" height="720"></canvas>
+<script src="/sdk.js"></script>
+<script>
+  // 1) copy this folder, rename it (no leading "_"), edit manifest.json -> the game appears in the menu automatically.
+  var ctx = document.getElementById('c').getContext('2d'), me = [];
+  Arcade.onStart(function (players) { me = players.map(function (p) { return { x: 640, y: 360, color: p.color, name: p.name, score: 0 }; }); });
+  Arcade.onFrame(function (ps, dt) {
+    ctx.fillStyle = '#0a0620'; ctx.fillRect(0, 0, 1280, 720);
+    ps.forEach(function (p, i) {
+      var m = me[i]; m.x += p.x * 400 * dt; m.y += p.y * 400 * dt;
+      if (p.hit.a) { m.score++; Arcade.vibrate(i, 30); }
+      if (m.score >= 10) return Arcade.end({ title: m.name + ' WINS!', color: m.color, lines: me.map(function (q) { return { name: q.name, color: q.color, text: String(q.score) }; }) });
+      ctx.fillStyle = m.color; ctx.beginPath(); ctx.arc(m.x, m.y, 24, 0, 7); ctx.fill();
+    });
+  });
+</script></body></html>

@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0a0620">
+<title>Arcade Controller</title>
+<link rel="stylesheet" href="/fonts/fonts.css">
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;touch-action:none}
+  html,body{margin:0;height:100%;background:#0a0620;color:#fff;font-family:Mukta,"Noto Sans Devanagari","Nirmala UI",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden;overscroll-behavior:none}
+  body{background:radial-gradient(900px 500px at 20% 0%,rgba(255,61,113,.22),transparent),radial-gradient(900px 500px at 90% 100%,rgba(34,211,238,.2),transparent),#0a0620}
+  #join{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px}
+  #join h1{margin:0 0 6px;font-size:34px;letter-spacing:2px;font-weight:900;text-shadow:0 0 24px #ff3d71}
+  #join p{margin:0 0 8px;color:#9fb0d6;font-size:15px}
+  input{width:min(320px,100%);padding:16px 18px;font-size:22px;font-weight:700;border-radius:16px;border:2px solid rgba(255,255,255,.18);background:rgba(255,255,255,.07);color:#fff;text-align:center;outline:none;touch-action:auto;-webkit-user-select:text;user-select:text}
+  input:focus{border-color:#22d3ee;box-shadow:0 0 20px rgba(34,211,238,.4)}
+  #code{letter-spacing:10px;text-transform:uppercase;font-size:30px}
+  button#go{width:min(320px,100%);padding:18px;font-size:22px;font-weight:900;border:0;border-radius:16px;color:#06121a;background:linear-gradient(135deg,#22d3ee,#7cff4d);box-shadow:0 0 30px rgba(34,211,238,.5);touch-action:manipulation}
+  #err{color:#ff6b8a;min-height:22px;font-weight:700;text-align:center}
+  #pad{position:fixed;inset:0;display:none;flex-direction:column}
+  #top{height:54px;flex:none;display:flex;align-items:center;gap:12px;padding:0 18px;background:rgba(255,255,255,.06)}
+  #dot{width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 0 14px currentColor}
+  #pname{font-weight:900;font-size:18px}
+  #hint{margin-left:auto;font-size:15px;line-height:1.15;color:#b9c6ee;text-align:right;max-width:70%;white-space:pre-line}
+  #main{flex:1;display:flex;min-height:0;position:relative}
+  #stickZone{flex:1.15;position:relative}
+  #idle{position:absolute;left:50%;top:50%;width:150px;height:150px;margin:-75px 0 0 -75px;border-radius:50%;border:3px dashed rgba(255,255,255,.18)}
+  #base,#thumb{position:absolute;border-radius:50%;display:none;pointer-events:none}
+  #base{width:150px;height:150px;margin:-75px 0 0 -75px;border:3px solid rgba(255,255,255,.35);background:rgba(255,255,255,.07)}
+  #thumb{width:72px;height:72px;margin:-36px 0 0 -36px;background:radial-gradient(circle at 35% 30%,#fff,var(--me,#22d3ee));box-shadow:0 0 26px var(--me,#22d3ee)}
+  #btns{flex:1;display:flex;gap:16px;padding:16px 22px;align-items:center;justify-content:center}
+  .btn{flex:1;max-width:210px;aspect-ratio:1;border-radius:50%;border:4px solid var(--c);color:#fff;font-weight:900;font-size:20px;display:flex;align-items:center;justify-content:center;text-align:center;background:radial-gradient(circle at 35% 28%,rgba(255,255,255,.28),transparent 60%),rgba(0,0,0,.35);box-shadow:0 0 28px var(--c),inset 0 0 24px rgba(0,0,0,.4);text-shadow:0 2px 6px rgba(0,0,0,.6)}
+  .btn{white-space:pre-line;line-height:1.05;padding:4px}
+  .btn.on{background:var(--c);transform:scale(.93)}
+  #btns.wide{padding:16px 18px}
+  #btns.wide .btn{max-width:none;aspect-ratio:auto;height:88%;border-radius:32px;font-size:44px}
+  #wait{position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;padding:30px;font-size:24px;font-weight:800;color:#cdd7f5}
+  #rot{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:rgba(10,6,32,.95);font-size:22px;font-weight:800;z-index:9;text-align:center;padding:30px}
+  #rot b{font-size:64px}
+  @media (orientation:portrait){#pad.active #rot{display:flex}}
+  #status{position:fixed;left:0;right:0;top:54px;text-align:center;background:#ff8a00;color:#1a0b00;font-weight:800;padding:6px;display:none;z-index:8}
+</style>
+</head>
+<body>
+<div id="join">
+  <h1>NEON ARCADE</h1>
+  <p>Enter the room code from the big screen</p>
+  <input id="code" maxlength="4" placeholder="0000" inputmode="numeric" pattern="[0-9]*" autocomplete="off" spellcheck="false">
+  <input id="name" maxlength="10" placeholder="Your name" autocomplete="off">
+  <button id="go">JOIN</button>
+  <div id="err"></div>
+</div>
+
+<div id="pad">
+  <div id="top"><span id="dot"></span><span id="pname"></span><span id="hint"></span></div>
+  <div id="status">Reconnecting…</div>
+  <div id="main">
+    <div id="stickZone"><div id="idle"></div><div id="base"></div><div id="thumb"></div></div>
+    <div id="btns"></div>
+    <div id="wait"></div>
+  </div>
+  <div id="rot"><b>⟳</b>Rotate your phone sideways</div>
+</div>
+
+<script>
+(() => {
+'use strict';
+const $ = id => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+$('code').value = (params.get('room') || localStorage.getItem('ax_code') || '').toUpperCase().slice(0, 4);
+$('name').value = localStorage.getItem('ax_name') || '';
+
+let ws = null, joined = false, token = '', wantReconnect = false, sx = 0, sy = 0, dirty = false;
+
+function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
+function buzz(ms) { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} }
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(proto + '://' + location.host);
+  ws.onopen = () => {
+    send({ t: 'join', code: $('code').value.trim().toUpperCase(), name: $('name').value.trim() || 'Player', token });
+  };
+  ws.onmessage = e => {
+    let m; try { m = JSON.parse(e.data); } catch { return; }
+    if (m.t === 'joined') {
+      token = m.token; joined = true; wantReconnect = true;
+      localStorage.setItem('ax_code', $('code').value.trim().toUpperCase());
+      localStorage.setItem('ax_name', m.name);
+      $('join').style.display = 'none'; $('pad').style.display = 'flex'; $('pad').classList.add('active');
+      $('status').style.display = 'none'; $('pname').textContent = m.name;
+    } else if (m.t === 'me') {
+      document.documentElement.style.setProperty('--me', m.color);
+      $('dot').style.background = m.color; $('dot').style.color = m.color; $('pname').textContent = m.name;
+    } else if (m.t === 'layout') {
+      applyLayout(m.layout);
+    } else if (m.t === 'vib') {
+      buzz(m.ms || 40);
+    } else if (m.t === 'hostgone') {
+      $('status').textContent = 'Big screen disconnected… waiting'; $('status').style.display = 'block';
+    } else if (m.t === 'err') {
+      wantReconnect = false; joined = false; $('err').textContent = m.msg; $('go').disabled = false;
+      try { ws.close(); } catch (e2) {}
+    }
+  };
+  ws.onclose = () => {
+    if (joined || wantReconnect) {
+      $('status').textContent = 'Reconnecting…'; $('status').style.display = 'block';
+      setTimeout(connect, 1200);
+    }
+  };
+}
+
+$('go').addEventListener('click', () => {
+  const c = $('code').value.trim();
+  if (c.length < 4) { $('err').textContent = 'Enter the 4-digit code'; return; }
+  $('err').textContent = ''; $('go').disabled = true;
+  try { const el = document.documentElement; if (el.requestFullscreen) el.requestFullscreen().catch(() => {}); if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {}); } catch (e) {}
+  if (ws) { try { ws.onclose = null; ws.close(); } catch (e) {} }
+  connect();
+  setTimeout(() => { $('go').disabled = false; }, 2500);
+});
+
+// ----- layout -----
+const zone = $('stickZone'), base = $('base'), thumb = $('thumb');
+function applyLayout(l) {
+  $('hint').textContent = l.hint || '';
+  zone.style.display = l.stick ? 'block' : 'none';
+  document.querySelectorAll('.btn.on').forEach(el => send({ t: 'in', k: 'b', b: el.dataset.id, v: 0 }));
+  const b = $('btns'); b.innerHTML = '';
+  b.classList.toggle('wide', !l.stick && (l.buttons || []).length > 0);
+  (l.buttons || []).forEach(bt => {
+    const el = document.createElement('div');
+    el.className = 'btn'; el.dataset.id = bt.id; el.style.setProperty('--c', bt.color || '#22d3ee'); el.textContent = bt.label;
+    const ln = String(bt.label || '').replace(/\n/g, '').length; if (ln > 3) el.style.fontSize = (ln > 9 ? 18 : 24) + 'px';
+    bindBtn(el, bt.id); b.appendChild(el);
+  });
+  const none = !l.stick && !(l.buttons || []).length;
+  $('wait').style.display = none ? 'flex' : 'none'; $('wait').textContent = l.hint || '';
+  b.style.display = (l.buttons || []).length ? 'flex' : 'none';
+  endStick();
+}
+
+function bindBtn(el, id) {
+  const up = () => { if (el.classList.contains('on')) { el.classList.remove('on'); send({ t: 'in', k: 'b', b: id, v: 0 }); } };
+  el.addEventListener('pointerdown', e => {
+    e.preventDefault(); try { el.setPointerCapture(e.pointerId); } catch (e2) {}
+    if (!el.classList.contains('on')) { el.classList.add('on'); send({ t: 'in', k: 'b', b: id, v: 1 }); buzz(12); }
+  });
+  el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up); el.addEventListener('lostpointercapture', up);
+}
+
+// ----- floating joystick -----
+let sp = null, so = { x: 0, y: 0 };
+const R = 70;
+function place(el, p) { el.style.left = p.x + 'px'; el.style.top = p.y + 'px'; }
+function endStick() { sp = null; base.style.display = thumb.style.display = 'none'; $('idle').style.display = 'block'; if (sx || sy) { sx = sy = 0; dirty = true; } }
+zone.addEventListener('pointerdown', e => {
+  if (sp !== null) return;
+  e.preventDefault(); sp = e.pointerId; try { zone.setPointerCapture(e.pointerId); } catch (e2) {}
+  const r = zone.getBoundingClientRect(); so = { x: e.clientX - r.left, y: e.clientY - r.top };
+  base.style.display = thumb.style.display = 'block'; $('idle').style.display = 'none'; place(base, so); place(thumb, so);
+});
+zone.addEventListener('pointermove', e => {
+  if (e.pointerId !== sp) return;
+  const r = zone.getBoundingClientRect();
+  let dx = e.clientX - r.left - so.x, dy = e.clientY - r.top - so.y;
+  const d = Math.hypot(dx, dy), k = d > R ? R / d : 1; dx *= k; dy *= k;
+  place(thumb, { x: so.x + dx, y: so.y + dy });
+  sx = dx / R; sy = dy / R; dirty = true;
+});
+['pointerup', 'pointercancel'].forEach(ev => zone.addEventListener(ev, e => { if (e.pointerId === sp) endStick(); }));
+setInterval(() => { if (dirty) { dirty = false; send({ t: 'in', k: 's', x: Math.round(sx * 100) / 100, y: Math.round(sy * 100) / 100 }); } }, 33);
+
+document.addEventListener('visibilitychange', () => { if (document.hidden) { endStick(); document.querySelectorAll('.btn.on').forEach(b => b.dispatchEvent(new Event('pointercancel'))); } });
+document.addEventListener('contextmenu', e => e.preventDefault());
+
+// auto-join when opened from QR with a code and a remembered name
+if (params.get('room') && $('name').value) { $('go').click(); }
+})();
+</script>
+</body>
+</html>

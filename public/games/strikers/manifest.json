@@ -1,0 +1,10 @@
+{
+  "type": "canvas",
+  "entry": "game.js",
+  "name": "NEON STRIKERS",
+  "tag": "Team football: red vs cyan|score before time runs out",
+  "color": "#7cff4d",
+  "min": 2,
+  "max": 8,
+  "order": 50
+}

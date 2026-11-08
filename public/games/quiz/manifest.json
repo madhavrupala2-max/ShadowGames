@@ -1,0 +1,17 @@
+{
+  "type": "canvas",
+  "entry": "game.js",
+  "name": "COMPUTER JI QUIZ",
+  "tag": "KBC style · हिंदी + English|AI makes new questions",
+  "color": "#ffb300",
+  "min": 1,
+  "max": 8,
+  "order": 5,
+  "noCountdown": true,
+  "layout": {
+    "stick": false,
+    "buttons": [],
+    "hint": "Quiz"
+  },
+  "touch": true
+}

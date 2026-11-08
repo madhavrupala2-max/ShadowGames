@@ -1,0 +1,10 @@
+{
+  "type": "canvas",
+  "entry": "game.js",
+  "name": "SUMO SMASH",
+  "tag": "Dash & shove rivals|off the crumbling arena",
+  "color": "#ff8a00",
+  "min": 2,
+  "max": 8,
+  "order": 20
+}
