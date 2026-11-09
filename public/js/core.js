@@ -26,7 +26,8 @@ function text(c, s, x, y, size = 40, color = '#fff', align = 'center', weight = 
 const fx = {
   parts: [], rings: [], shakeV: 0,
   burst(x, y, color, n = 20, speed = 300, life = 0.7, size = 5) {
-    for (let i = 0; i < n && this.parts.length < 1600; i++) {
+    if (lowPerf) n = Math.max(4, n >> 1);
+    for (let i = 0; i < n && this.parts.length < (lowPerf ? 400 : 1600); i++) {
       const a = Math.random() * TAU, s = speed * (0.2 + Math.random() * 0.8);
       const l = life * (0.5 + Math.random() * 0.7);
       this.parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: l, max: l, size: size * (0.5 + Math.random()), color, drag: 2.4 });
@@ -80,14 +81,36 @@ function noise(d, vol = 0.15) {
   s.connect(g); g.connect(ac.destination); s.start();
 }
 const settings = { voice: true, music: true };
+let lowPerf = new URLSearchParams(location.search).get('fx') === 'low';
+let voicesReady = false; const speakQ = [];
 function pickVoice(lang) {
   try { const vs = speechSynthesis.getVoices(); return vs.find(v => v.lang === lang) || vs.find(v => v.lang.slice(0, 2) === lang.slice(0, 2)) || null; } catch (e) { return null; }
 }
-function speak(txt, lang = 'hi-IN', rate = 0.9) {
-  if (!settings.voice || typeof speechSynthesis === 'undefined' || typeof SpeechSynthesisUtterance === 'undefined') return;
-  try { const u = new SpeechSynthesisUtterance(String(txt)); u.lang = lang; const v = pickVoice(lang); if (v) u.voice = v; u.rate = rate; speechSynthesis.speak(u); } catch (e) {}
+function hostCanSpeak() { return typeof speechSynthesis !== 'undefined' && typeof SpeechSynthesisUtterance !== 'undefined'; }
+function doSpeak(txt, lang, rate) {
+  try {
+    if (speechSynthesis.paused) speechSynthesis.resume();   // Android Chrome gets stuck paused and swallows speak()
+    const u = new SpeechSynthesisUtterance(String(txt)); u.lang = lang; const v = pickVoice(lang); if (v) u.voice = v; u.rate = rate;
+    speechSynthesis.speak(u);
+  } catch (e) {}
 }
-function stopSpeak() { try { if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel(); } catch (e) {} }
+// Chrome (esp. Android/TV) loads voices async: speaking before voiceschanged fires is silently dropped
+function initSpeech() {
+  if (!hostCanSpeak()) return;
+  const ready = () => { if (voicesReady) return; voicesReady = true; const q = speakQ.splice(0); q.forEach(x => doSpeak(x.txt, x.lang, x.rate)); };
+  try { if (speechSynthesis.getVoices().length) return ready(); speechSynthesis.onvoiceschanged = ready; setTimeout(ready, 1500); } catch (e) { ready(); }
+}
+function speak(txt, lang = 'hi-IN', rate = 0.9) {
+  if (!settings.voice) return;
+  if (hostCanSpeak()) { if (voicesReady) doSpeak(txt, lang, rate); else speakQ.push({ txt, lang, rate }); return; }
+  const r = players.find(p => p.remote && !p.left);   // host has no TTS (some TV browsers): a joined phone speaks instead
+  if (r) sendTo(r.rid, { t: 'speak', txt: String(txt), lang, rate });
+}
+function stopSpeak() {
+  speakQ.length = 0;
+  try { if (hostCanSpeak()) speechSynthesis.cancel(); } catch (e) {}
+  for (const p of players) if (p.remote) sendTo(p.rid, { t: 'stopSpeak' });
+}
 let lastShoot = 0;
 const sfx = {
   shoot() { const n = performance.now(); if (n - lastShoot < 60) return; lastShoot = n; tone(680, 0.1, 'square', 0.03, -420); },
@@ -282,6 +305,11 @@ function pollKeyboards() {
 
 // mouse / touch (host screen; on a phone the screen itself is the controller, see js/touch.js)
 const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
+// glow (shadowBlur) is the #1 cost on weak GPUs (Android TV): in low-perf mode every assignment becomes 0
+(() => {
+  const d = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, 'shadowBlur');
+  if (d && d.set) Object.defineProperty(ctx, 'shadowBlur', { get() { return d.get.call(this); }, set(v) { d.set.call(this, lowPerf ? 0 : v); } });
+})();
 let scale = 1, ox = 0, oy = 0;
 function resize() {
   const dpr = Math.min(window.devicePixelRatio || 1, 2), w = window.innerWidth, h = window.innerHeight;
@@ -451,19 +479,29 @@ function drawBigBtn(z, col, label, sub) {
   if (sub) text(ctx, sub, z.x + z.w / 2, z.y + z.h / 2 + 26, 24, '#cdd7f5', 'center', 600);
   ctx.restore();
 }
+function shareJoin() {
+  const url = baseUrl + '/c?room=' + roomCode;
+  const txt = 'Shadow Arcade me join karo! Room code: ' + roomCode;
+  if (navigator.share) navigator.share({ title: 'Shadow Arcade', text: txt, url }).catch(() => {});
+  else if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt + ' ' + url).then(() => toast('Join link copy ho gaya — kahin bhi paste karo'), () => toast(url));
+  else toast(url);
+}
 function drawLobby() {
   drawBG();
   drawTitle(isTouch ? 'Room ban gaya! Code/link bhejo — sab join karein, phir game chuno.' : 'Room ready! Share the code/link — sab join hone ke baad Player ★ game chunega.');
   drawJoinPanel();
   drawPlayers(296);
   lobbyZones.length = 0;
-  const z1 = { x: W / 2 - 410, y: 790, w: 820, h: 120, act: toGames };
+  const z1 = { x: W / 2 - 410, y: 756, w: 820, h: 112, act: toGames };
   drawBigBtn(z1, '#7cff4d', 'SAB JOIN HO GAYE · GAME CHUNO ▶', 'Everyone joined? Pick a game');
   lobbyZones.push(z1);
   if (isTouch) {
-    const z2 = { x: W / 2 - 410, y: 944, w: 820, h: 76, act: () => { location.href = '/c'; } };
-    drawBigBtn(z2, '#ff8a00', 'USE THIS PHONE AS A REMOTE INSTEAD');
+    const z2 = { x: W / 2 - 410, y: 884, w: 820, h: 76, act: shareJoin };
+    drawBigBtn(z2, '#22d3ee', 'SHARE JOIN LINK · WhatsApp / SMS');
     lobbyZones.push(z2);
+    const z3 = { x: W / 2 - 410, y: 976, w: 820, h: 64, act: () => { location.href = '/c'; } };
+    drawBigBtn(z3, '#ff8a00', 'USE THIS PHONE AS A REMOTE INSTEAD');
+    lobbyZones.push(z3);
   } else {
     text(ctx, 'Enter = game chuno', W / 2, 982, 26, '#8d9bc4', 'center', 600);
   }
@@ -666,9 +704,16 @@ function loadFonts() {
 }
 
 // ---------- boot ----------
-let last = 0;
+let last = 0, emaDt = 0.016, slowT = 0;
 function frame(t) {
   const dt = Math.min(0.05, (t - last) / 1000 || 0.016); last = t;
+  if (!lowPerf) {   // auto-detect slow devices (Android TV etc.) and drop glow effects
+    emaDt += (dt - emaDt) * 0.06;
+    if (state === 'play' || state === 'countdown') {
+      if (emaDt > 0.034) slowT += dt; else slowT = Math.max(0, slowT - dt * 2);
+      if (slowT > 2.5) { lowPerf = true; toast('Performance mode ON — smooth play ke liye glow effects off'); }
+    }
+  }
   try { update(dt); draw(); }
   catch (e) {   // a broken game must never freeze the console: go back to the menu and keep running
     console.error('[arcade] error in ' + (curDef ? curDef.id : 'menu') + ':', e);
@@ -678,6 +723,7 @@ function frame(t) {
 }
 function start() {
   resize(); window.addEventListener('resize', resize);
+  initSpeech();
   if (isTouch) addPlayer({ touch: true, name: 'YOU' });
   fetch('/info').then(r => r.json()).then(i => { info = i; refreshQR(); }).catch(() => {});
   connect();

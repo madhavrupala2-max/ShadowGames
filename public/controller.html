@@ -75,6 +75,17 @@ let ws = null, joined = false, token = '', wantReconnect = false, sx = 0, sy = 0
 
 function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
 function buzz(ms) { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} }
+// host (TV) browsers often lack TTS: the phone speaks quiz questions instead
+function say(txt, lang, rate) {
+  if (typeof speechSynthesis === 'undefined' || typeof SpeechSynthesisUtterance === 'undefined') return;
+  try {
+    if (speechSynthesis.paused) speechSynthesis.resume();
+    const u = new SpeechSynthesisUtterance(String(txt)); u.lang = lang || 'hi-IN'; u.rate = rate || 0.9;
+    const vs = speechSynthesis.getVoices(), v = vs.find(x => x.lang === u.lang) || vs.find(x => x.lang.slice(0, 2) === u.lang.slice(0, 2));
+    if (v) u.voice = v;
+    speechSynthesis.speak(u);
+  } catch (e) {}
+}
 
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -97,6 +108,10 @@ function connect() {
       applyLayout(m.layout);
     } else if (m.t === 'vib') {
       buzz(m.ms || 40);
+    } else if (m.t === 'speak') {
+      say(m.txt, m.lang, m.rate);
+    } else if (m.t === 'stopSpeak') {
+      try { speechSynthesis.cancel(); } catch (e2) {}
     } else if (m.t === 'hostgone') {
       $('status').textContent = 'Big screen disconnected… waiting'; $('status').style.display = 'block';
     } else if (m.t === 'err') {
