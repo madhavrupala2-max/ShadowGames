@@ -82,6 +82,12 @@ function noise(d, vol = 0.15) {
 }
 const settings = { voice: true, music: true };
 let lowPerf = new URLSearchParams(location.search).get('fx') === 'low';
+let renderScale = lowPerf ? 0.6 : 1;
+function enableLowPerf() {
+  if (lowPerf && renderScale < 1) return;
+  lowPerf = true; renderScale = 0.6; resize();
+  toast('Performance mode ON — smooth play ke liye quality kam');
+}
 let voicesReady = false; const speakQ = [];
 function pickVoice(lang) {
   try { const vs = speechSynthesis.getVoices(); return vs.find(v => v.lang === lang) || vs.find(v => v.lang.slice(0, 2) === lang.slice(0, 2)) || null; } catch (e) { return null; }
@@ -312,8 +318,9 @@ const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
 })();
 let scale = 1, ox = 0, oy = 0;
 function resize() {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2), w = window.innerWidth, h = window.innerHeight;
-  canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+  // renderScale < 1 = fewer pixels to fill (biggest win on weak Android GPUs); browser upscales for free
+  const dpr = Math.min(window.devicePixelRatio || 1, 2) * renderScale, w = window.innerWidth, h = window.innerHeight;
+  canvas.width = Math.max(320, Math.round(w * dpr)); canvas.height = Math.max(180, Math.round(h * dpr));
   canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
   scale = Math.min(canvas.width / W, canvas.height / H);
   ox = (canvas.width - W * scale) / 2; oy = (canvas.height - H * scale) / 2;
@@ -415,6 +422,7 @@ function blob(x, y, r, col) {
 function drawBG() {
   const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#0a0620'); g.addColorStop(1, '#17093a');
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  if (lowPerf) return;   // blobs + grid are pure fillrate cost on weak GPUs
   blob(500 + Math.sin(T * 0.2) * 220, 330, 760, 'rgba(255,61,113,0.20)');
   blob(1500 + Math.cos(T * 0.25) * 160, 760, 860, 'rgba(34,211,238,0.17)');
   blob(960, 1100, 700, 'rgba(194,100,255,0.15)');
@@ -704,15 +712,16 @@ function loadFonts() {
 }
 
 // ---------- boot ----------
-let last = 0, emaDt = 0.016, slowT = 0;
+let last = 0, emaDt = 0.016, slowT = 0, lastDraw = 0;
 function frame(t) {
-  const dt = Math.min(0.05, (t - last) / 1000 || 0.016); last = t;
-  if (!lowPerf) {   // auto-detect slow devices (Android TV etc.) and drop glow effects
+  const raw = (t - last) / 1000 || 0.016;
+  if (lowPerf && t - lastDraw < 26) { requestAnimationFrame(frame); return; }   // cap ~38fps: weaker GPU load, dt-based games stay correct
+  lastDraw = t;
+  const dt = Math.min(0.05, raw); last = t;
+  if (!lowPerf && T > 2.5) {   // auto-detect slow devices (Android phone/TV) and drop quality
     emaDt += (dt - emaDt) * 0.06;
-    if (state === 'play' || state === 'countdown') {
-      if (emaDt > 0.034) slowT += dt; else slowT = Math.max(0, slowT - dt * 2);
-      if (slowT > 2.5) { lowPerf = true; toast('Performance mode ON — smooth play ke liye glow effects off'); }
-    }
+    if (emaDt > 0.036) slowT += dt; else slowT = Math.max(0, slowT - dt * 2);
+    if (slowT > 2) enableLowPerf();
   }
   try { update(dt); draw(); }
   catch (e) {   // a broken game must never freeze the console: go back to the menu and keep running
