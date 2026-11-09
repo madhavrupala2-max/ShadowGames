@@ -1,21 +1,30 @@
 'use strict';
-// Arcade server: static files + WebSocket room relay (host screen <-> phone controllers)
+// Shadow Arcade server: static files + WebSocket room relay + auto game list + Gemini quiz API
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+
+// tiny .env loader (no extra dependency)
+try {
+  for (const l of fs.readFileSync(path.join(__dirname, '.env'), 'utf8').split(/\r?\n/)) {
+    const m = l.match(/^\s*([A-Za-z0-9_]+)\s*=\s*(.*?)\s*$/);
+    if (m && !(m[1] in process.env)) process.env[m[1]] = m[2].replace(/^['"]|['"]$/g, '');
+  }
+} catch (e) { /* no .env file - fine */ }
+
 const { WebSocketServer } = require('ws');
 const QRCode = require('qrcode');
-const ai = require('./server/ai');
+const quiz = require('./quiz');
 
 const PORT = +process.env.PORT || 3000;
 const PUB = path.join(__dirname, 'public');
+const GAMES_DIR = path.join(PUB, 'js', 'games');
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon', '.json': 'application/json', '.woff2': 'font/woff2', '.mp3': 'audio/mpeg',
-  '.ogg': 'audio/ogg', '.wav': 'audio/wav', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif'
+  '.ico': 'image/x-icon', '.json': 'application/json', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.webp': 'image/webp', '.jpg': 'image/jpeg'
 };
 const rooms = new Map();
 
@@ -26,56 +35,42 @@ function lanIPs() {
   return out;
 }
 function newCode() {
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
   let c;
-  do { c = String(Math.floor(1000 + Math.random() * 9000)); } while (rooms.has(c));
+  do { c = ''; for (let i = 0; i < 4; i++) c += A[Math.floor(Math.random() * A.length)]; } while (rooms.has(c));
   return c;
 }
-// ---- plugin games: every folder in public/games/<id>/ with a manifest.json (folders starting with _ are ignored)
-function listGames() {
-  const dir = path.join(PUB, 'games'), out = [];
-  let names = []; try { names = fs.readdirSync(dir); } catch (e) {}
-  for (const id of names) {
-    if (id.startsWith('_') || id.startsWith('.') || !/^[A-Za-z0-9_-]+$/.test(id)) continue;
-    try {
-      const m = JSON.parse(fs.readFileSync(path.join(dir, id, 'manifest.json'), 'utf8'));
-      const type = m.type === 'html' ? 'html' : 'canvas';
-      const entry = String(m.entry || (type === 'html' ? 'index.html' : 'game.js'));
-      if (entry.includes('..') || !fs.existsSync(path.join(dir, id, entry))) { console.warn('  [games] skipped ' + id + ': entry not found'); continue; }
-      out.push(Object.assign({ name: id.toUpperCase(), tag: '', color: '#22d3ee', min: 1, max: 8, order: 100 }, m, { id, type, entry, base: '/games/' + id + '/' }));
-    } catch (e) { console.warn('  [games] skipped ' + id + ': ' + e.message); }
-  }
-  return out.sort((a, b) => (a.order - b.order) || String(a.name).localeCompare(String(b.name)));
-}
-const rl = []; // global rate limit for the AI endpoint (protects your key): 40 calls / minute
-function rateOk() { const n = Date.now(); while (rl.length && n - rl[0] > 60000) rl.shift(); if (rl.length >= 40) return false; rl.push(n); return true; }
-function readBody(req, max = 30000) {
-  return new Promise((ok, no) => { let b = '', n = 0; req.on('data', d => { n += d.length; if (n > max) { no(new Error('too big')); req.destroy(); } else b += d; }); req.on('end', () => ok(b)); req.on('error', no); });
-}
-const json = (res, code, o) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(o)); };
-
 const send = (ws, o) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
+const json = (res, code, o) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(o)); };
+function readBody(req, max = 40000) {
+  return new Promise((ok, bad) => {
+    let s = '';
+    req.on('data', d => { s += d; if (s.length > max) { bad(new Error('too big')); req.destroy(); } });
+    req.on('end', () => ok(s));
+    req.on('error', bad);
+  });
+}
 
 const server = http.createServer(async (req, res) => {
   try {
     const u = new URL(req.url, 'http://x');
-    if (u.pathname === '/games.json') return json(res, 200, listGames());
-    if (u.pathname === '/api/health') return json(res, 200, { ai: ai.hasKey() });
-    if (u.pathname === '/api/questions') {
-      if (req.method !== 'POST') return json(res, 405, { error: 'POST only' });
-      if (!rateOk()) return json(res, 429, { error: 'slow down' });
-      let body = {}; try { body = JSON.parse(await readBody(req) || '{}'); } catch (e) { return json(res, 400, { error: 'bad json' }); }
-      return json(res, 200, await ai.getQuestions(body));
+    if (u.pathname === '/info') return json(res, 200, { lan: lanIPs()[0] || null, port: PORT, gemini: quiz.hasKey() });
+    if (u.pathname === '/games.json') {
+      // every .js in public/js/games (not starting with "_") is a game - drop a file in, it shows up.
+      let list = [];
+      try { list = fs.readdirSync(GAMES_DIR).filter(f => f.endsWith('.js') && !f.startsWith('_')).sort(); } catch (e) {}
+      return json(res, 200, list);
     }
-    if (u.pathname === '/info') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ lan: lanIPs()[0] || null, port: PORT }));
+    if (u.pathname === '/api/quiz' && req.method === 'POST') {
+      let b = {}; try { b = JSON.parse(await readBody(req)); } catch (e) {}
+      return json(res, 200, await quiz.getQuestions(b.count, b.avoid));
     }
     if (u.pathname === '/qr') {
       const png = await QRCode.toBuffer((u.searchParams.get('data') || '').slice(0, 300), { width: 400, margin: 1 });
       res.writeHead(200, { 'Content-Type': 'image/png' });
       return res.end(png);
     }
-    const p = u.pathname === '/' ? '/host.html' : u.pathname === '/c' ? '/controller.html' : u.pathname;
+    const p = u.pathname === '/' ? '/host.html' : u.pathname === '/c' ? '/controller.html' : decodeURIComponent(u.pathname);
     const f = path.normalize(path.join(PUB, p));
     if (!f.startsWith(PUB)) { res.writeHead(403); return res.end(); }
     fs.readFile(f, (e, d) => {
@@ -163,11 +158,10 @@ setInterval(() => {
 }, 15000);
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log('\n  ARCADE is running!\n');
+  console.log('\n  SHADOW ARCADE is running!\n');
   console.log('  Big screen (laptop / TV browser):  http://localhost:' + PORT);
   const ips = lanIPs();
   if (ips.length) console.log('  Phones (same Wi-Fi) will auto-open:  http://' + ips[0] + ':' + PORT + '/c');
-  console.log(ai.hasKey() ? '  AI questions: ON  (key found)' : '  AI questions: OFF - add ROUTER_API_KEY in .env (see .env.example); demo questions will be used');
-  console.log('  Games loaded: ' + listGames().map(g => g.id).join(', '));
+  console.log(quiz.hasKey() ? '  Quiz questions: Gemini AI (key found)' : '  Quiz questions: OFFLINE bank only - add GEMINI_API_KEY in .env for unlimited AI questions');
   console.log('');
 });
